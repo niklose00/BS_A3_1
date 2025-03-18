@@ -1,7 +1,9 @@
 package org.zfs.api;
 
+import org.zfs.manager.FileOperationHandler;
 import org.zfs.manager.TransactionManager;
 import org.zfs.manager.ZfsSnapshotManager;
+import org.zfs.model.Transaction;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -14,27 +16,33 @@ public class ZfsTransactionAPI {
         this.transactionManager = new TransactionManager(snapshotManager);
     }
 
+    // ✅ Transaktion starten
     public String startTransaction() {
         return transactionManager.startTransaction();
     }
 
+    // ✅ Transaktion committen
     public void commitTransaction(String transactionId) throws IOException {
         transactionManager.commitTransaction(transactionId);
     }
 
-    public void rollbackTransaction(String transactionId) {
-        transactionManager.rollbackTransaction(transactionId);
+    // ✅ Transaktion zurückrollen
+    public void rollbackTransaction(Transaction tx) {
+        transactionManager.rollbackTransaction(tx);
     }
 
-    public void writeFile(TransactionManager transactionManager, String txId, Path path, String content) throws Exception {
-        org.zfs.manager.FileOperationHandler.writeFile(transactionManager,txId, path, content);
+    // ✅ Datei schreiben (internes Tracking der Änderung wird erledigt)
+    public void writeFile(String transactionId, Path path, String content, boolean append) throws IOException {
+        FileOperationHandler.writeFile(transactionManager, transactionId, path, content, append);
     }
 
-    public String readFile(Path path) throws Exception {
-        return org.zfs.manager.FileOperationHandler.readFile(path);
+    // ✅ Datei lesen (kein Transaktionskontext nötig)
+    public String readFile(Path path) throws IOException {
+        return FileOperationHandler.readFile(path);
     }
 
-    public void deleteFile(TransactionManager transactionManager, String txId,Path path) throws Exception {
-        org.zfs.manager.FileOperationHandler.deleteFile(transactionManager,txId,path);
+    // ✅ Datei löschen (tracked Änderung automatisch)
+    public void deleteFile(String transactionId, Path path) throws IOException {
+        FileOperationHandler.deleteFile(transactionManager, transactionId, path);
     }
 }

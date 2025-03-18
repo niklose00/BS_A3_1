@@ -1,59 +1,40 @@
 package org.zfs;
 
-import org.zfs.manager.*;
-import org.zfs.model.Transaction;
+import org.zfs.api.ZfsTransactionAPI;
 
-import java.io.IOException;
-import java.nio.file.*;
-import java.util.concurrent.*;
+import java.nio.file.Path;
 
 public class Main {
     public static void main(String[] args) throws Exception {
-        String dataset = "zfs_tx_pool/data";
-        ZfsSnapshotManager snapshotManager = new ZfsSnapshotManager(dataset);
-        TransactionManager transactionManager = new TransactionManager(snapshotManager);
+        ZfsTransactionAPI api = new ZfsTransactionAPI("zfs_tx_pool/data");
+        Path filePath = Path.of("/mnt/zfs/test.txt");
 
-        Path filePath = Path.of("/mnt/zfs/testfile.txt");
+        // ✅ Transaktion A starten
+        String txA = api.startTransaction();
+        System.out.println("🚀 Transaktion A gestartet: " + txA);
 
-        // Initiale Datei schreiben
-        Files.writeString(filePath, "Initialer String",StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        // ✅ Transaktion B starten (parallel)
+        String txB = api.startTransaction();
+        System.out.println("🚀 Transaktion B gestartet: " + txB);
 
-        ExecutorService executor = Executors.newFixedThreadPool(2);
+        // ✏️ Transaktion A ändert die Datei
+        api.writeFile(txA, filePath, "Änderung durch A\n", false);
+        System.out.println("✏️ Transaktion A schreibt...");
 
-        // Starte zwei parallele Transaktionen
-        Future<String> future1 = executor.submit(() -> executeTransaction(transactionManager, filePath, "Änderung von T1"));
+        // ✅ Transaktion A committet (ohne Konflikt)
+        api.commitTransaction(txA);
+        System.out.println("✅ Transaktion A erfolgreich committed.");
 
-        Future<String> future2 = executor.submit(() -> executeTransaction(transactionManager, filePath, "Änderung von T2"));
+        // ✏️ Transaktion B versucht ebenfalls zu schreiben (kennt die Änderung von A nicht)
+        api.writeFile(txB, filePath, "Änderung durch B\n", false);
+        System.out.println("✏️ Transaktion B schreibt...");
 
-        // Ergebnisse sammeln
-        String result1 = future1.get();
-        String result2 = future2.get();
-
-        executor.shutdown();
-
-        // Endergebnisse ausgeben
-        System.out.println("Ergebnis Transaktion 1: " + result1);
-        System.out.println("Ergebnis Transaktion 2: " + result2);
-    }
-
-    private static String executeTransaction(TransactionManager transactionManager, Path filePath, String newContent) {
-        String txId = transactionManager.startTransaction();
-        System.out.println("Transaktion gestartet: " + txId);
-
+        // ⚠️ Transaktion B versucht zu committen → Muss scheitern!
         try {
-            // Datei bearbeiten
-            FileOperationHandler.writeFile(transactionManager, txId, filePath, newContent);
-            Thread.sleep(1000); // Simuliert Verzögerung
-
-            // Transaktion committen
-            transactionManager.commitTransaction(txId);
-            return "Erfolgreich";
-        } catch (IllegalStateException | InterruptedException e) {
-            transactionManager.rollbackTransaction(txId);
-            return "Fehlgeschlagen (Rollback ausgeführt)";
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            api.commitTransaction(txB);
+            System.out.println("✅ Transaktion B committed (Fehler! Hätte Konflikt sein müssen)");
+        } catch (IllegalStateException e) {
+            System.out.println("❌ Transaktion B fehlgeschlagen (Konflikt erkannt): " + e.getMessage());
         }
     }
 }
-

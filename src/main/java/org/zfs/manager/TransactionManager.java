@@ -1,14 +1,11 @@
 package org.zfs.manager;
 
-
 import org.zfs.model.Transaction;
 
 import java.io.IOException;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.nio.file.*;
-
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class TransactionManager {
     private final ZfsSnapshotManager snapshotManager;
@@ -21,63 +18,63 @@ public class TransactionManager {
     public String startTransaction() {
         String txId = UUID.randomUUID().toString();
         String snapshot = snapshotManager.createSnapshot(txId);
-
-        // Datei-Hashes sammeln
-        Map<String, String> initialHashes = new ConcurrentHashMap<>();
-        Map<String, String> beforeEditHashes = new ConcurrentHashMap<>();
-        Map<String, String> currentHashes = new ConcurrentHashMap<>();
+        Map<Path, String> fileHashes = new HashMap<>();
 
         try {
-            Files.walk(Path.of("/mnt/zfs/"))
+            Files.walk(Path.of("/mnt/zfs"))
                     .filter(Files::isRegularFile)
                     .forEach(path -> {
                         try {
-                            String hash = ConflictDetector.computeFileHash(path);
-                            initialHashes.put(path.toString(), hash);
-                            beforeEditHashes.put(path.toString(), hash);
+                            fileHashes.put(path, ConflictDetector.computeFileHash(path));
                         } catch (IOException e) {
-                            throw new RuntimeException("Fehler beim Hashen von " + path, e);
+                            throw new RuntimeException(e);
                         }
                     });
         } catch (IOException e) {
-            throw new RuntimeException("Fehler beim Durchlaufen des Verzeichnisses", e);
+            throw new RuntimeException("Fehler beim Scannen des Verzeichnisses", e);
         }
 
-        activeTransactions.put(txId, new Transaction(txId, snapshot, initialHashes, beforeEditHashes, currentHashes));
+        activeTransactions.put(txId, new Transaction(txId, snapshot, fileHashes, new HashSet<>()));
         return txId;
     }
 
-    public void beforeFileEdit(String txId, Path filePath) throws IOException {
+    public void markFileChanged(String txId, Path path) {
         Transaction tx = activeTransactions.get(txId);
-        if (tx == null) throw new IllegalStateException("Transaktion nicht gefunden");
-
-        String currentHash = ConflictDetector.computeFileHash(filePath);
-        tx.beforeEditHashes().put(filePath.toString(), currentHash);
+        if (tx != null) {
+            tx.changedFiles.add(path);
+        }
     }
-
-    public void afterFileEdit(String txId, Path filePath) throws IOException {
-        Transaction tx = activeTransactions.get(txId);
-        if (tx == null) throw new IllegalStateException("Transaktion nicht gefunden");
-
-        String newHash = ConflictDetector.computeFileHash(filePath);
-        tx.currentHashes().put(filePath.toString(), newHash);
-    }
-
 
     public void commitTransaction(String txId) throws IOException {
         Transaction tx = activeTransactions.remove(txId);
         if (tx == null) throw new IllegalStateException("Transaktion nicht gefunden");
 
-        if (org.zfs.manager.ConflictDetector.hasConflicts(tx)) {
-            rollbackTransaction(txId);
-            throw new IllegalStateException("Konflikt erkannt, Rollback durchgeführt");
+        for (Map.Entry<Path, String> entry : tx.initialFileHashes.entrySet()) {
+            Path path = entry.getKey();
+
+            // Wenn die Datei von dieser Transaktion verändert wurde → Skip Prüfung
+            if (tx.changedFiles.contains(path)) continue;
+
+            // Sonst prüfen ob jemand anderes sie verändert hat
+            if (Files.exists(path)) {
+                String currentHash = ConflictDetector.computeFileHash(path);
+                if (!entry.getValue().equals(currentHash)) {
+                    rollbackTransaction(tx);
+                    throw new IllegalStateException("⚠ Konflikt erkannt bei: " + path);
+                }
+            } else {
+                // Datei wurde extern gelöscht → Konflikt
+                rollbackTransaction(tx);
+                throw new IllegalStateException("⚠ Datei gelöscht während Transaktion: " + path);
+            }
         }
 
-        snapshotManager.deleteSnapshot(tx.snapshotName());
+        // Erfolg
+        snapshotManager.deleteSnapshot(tx.snapshotName);
     }
 
-    public void rollbackTransaction(String txId) {
-        Transaction tx = activeTransactions.remove(txId);
-        if (tx != null) snapshotManager.rollbackToSnapshot(tx.snapshotName());
+    public void rollbackTransaction(Transaction tx) {
+        snapshotManager.rollbackToSnapshot(tx.snapshotName);
+        snapshotManager.deleteSnapshot(tx.snapshotName);
     }
 }
