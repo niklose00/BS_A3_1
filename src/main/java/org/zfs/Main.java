@@ -1,40 +1,61 @@
 package org.zfs;
 
-import org.zfs.api.ZfsTransactionAPI;
+import org.zfs.manager.FileOperationHandler;
+import org.zfs.manager.TransactionManager;
+import org.zfs.manager.ZfsSnapshotManager;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
 public class Main {
-    public static void main(String[] args) throws Exception {
-        ZfsTransactionAPI api = new ZfsTransactionAPI("zfs_tx_pool/data");
-        Path filePath = Path.of("/mnt/zfs/test.txt");
-
-        // ✅ Transaktion A starten
-        String txA = api.startTransaction();
-        System.out.println("🚀 Transaktion A gestartet: " + txA);
-
-        // ✅ Transaktion B starten (parallel)
-        String txB = api.startTransaction();
-        System.out.println("🚀 Transaktion B gestartet: " + txB);
-
-        // ✏️ Transaktion A ändert die Datei
-        api.writeFile(txA, filePath, "Änderung durch A\n", false);
-        System.out.println("✏️ Transaktion A schreibt...");
-
-        // ✅ Transaktion A committet (ohne Konflikt)
-        api.commitTransaction(txA);
-        System.out.println("✅ Transaktion A erfolgreich committed.");
-
-        // ✏️ Transaktion B versucht ebenfalls zu schreiben (kennt die Änderung von A nicht)
-        api.writeFile(txB, filePath, "Änderung durch B\n", false);
-        System.out.println("✏️ Transaktion B schreibt...");
-
-        // ⚠️ Transaktion B versucht zu committen → Muss scheitern!
+    public static void main(String[] args) {
         try {
-            api.commitTransaction(txB);
-            System.out.println("✅ Transaktion B committed (Fehler! Hätte Konflikt sein müssen)");
-        } catch (IllegalStateException e) {
-            System.out.println("❌ Transaktion B fehlgeschlagen (Konflikt erkannt): " + e.getMessage());
+            // Erstelle eine temporäre Datei und schreibe den Initialinhalt
+            Path tempFile = Files.createTempFile("conflictTest", ".txt");
+            Files.writeString(tempFile, "Original Content", StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            System.out.println("Temp file created: " + tempFile);
+            System.out.println("Initial file content: " + Files.readString(tempFile));
+
+            // Erstelle Snapshot-Manager und Transaction-Manager (hier mit einem Dummy-Dataset "tank/mydataset")
+            ZfsSnapshotManager snapshotManager = new ZfsSnapshotManager("tank/mydataset");
+            TransactionManager transactionManager = new TransactionManager(snapshotManager);
+
+            // Person A startet eine Transaktion auf der Datei
+            String txIdA = transactionManager.startTransaction(tempFile);
+            System.out.println("Person A started transaction: " + txIdA);
+
+            // Person B startet ebenfalls eine Transaktion auf derselben Datei
+            String txIdB = transactionManager.startTransaction(tempFile);
+            System.out.println("Person B started transaction: " + txIdB);
+
+            // Person A ändert den Dateiinhalt und committet
+            try {
+                FileOperationHandler.writeFile(transactionManager, txIdA, "Person A's new content");
+                System.out.println("Person A committed transaction successfully.");
+            } catch (Exception e) {
+                System.out.println("Person A encountered an error: " + e.getMessage());
+            }
+
+            // Person B versucht danach die Datei zu ändern und zu committen.
+            // Da die Datei bereits von Person A geändert wurde, kommt es hier zu einem Konflikt.
+            try {
+                FileOperationHandler.writeFile(transactionManager, txIdB, "Person B's new content");
+                System.out.println("Person B committed transaction successfully.");
+            } catch (Exception e) {
+                System.out.println("Person B encountered a conflict: " + e.getMessage());
+            }
+
+            // Ausgabe des finalen Datei-Inhalts
+            System.out.println("Final file content: " + Files.readString(tempFile));
+
+            // Aufräumen: Lösche die temporäre Datei
+            Files.deleteIfExists(tempFile);
+            System.out.println("Temporary file deleted.");
+
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 }
