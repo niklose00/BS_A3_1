@@ -19,7 +19,7 @@ public class FileUtils {
     }
 
     public static boolean fileExists(Path file) {
-        return Files.exists(file) && Files.isRegularFile(file);
+        return Files.exists(file);
     }
 
 }

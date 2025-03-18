@@ -9,39 +9,35 @@ public class FileOperationHandler {
         return Files.readString(path);
     }
 
-    public static void writeFile(TransactionManager transactionManager,String txId, String content, boolean append) throws IOException {
-        writeFile(transactionManager, txId, content, append);
+    public static void writeFile(TransactionManager transactionManager,String txId, String content) throws IOException {
+        writeFile(transactionManager, txId, content, false);
     }
 
-    public static void writeFile(TransactionManager transactionManager,String txId, String content) throws IOException {
+    public static void writeFile(TransactionManager transactionManager,String txId, String content, boolean append) throws IOException {
         Path filePath = transactionManager.getTransaction(txId).getFilePath();
 
-        // Vorher Hash speichern
         transactionManager.beforeFileEdit(txId, filePath);
 
-        // Datei schreiben
-        Files.writeString(filePath, content, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        OpenOption[] options = append
+                ? new OpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.APPEND}
+                : new OpenOption[]{StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
 
-        // Nachher neuen Hash speichern
+        Files.writeString(filePath, content, options);
+
         transactionManager.afterFileEdit(txId, filePath);
 
-        // Transaktion beenden
         transactionManager.commitTransaction(txId);
     }
 
     public static void deleteFile(TransactionManager transactionManager,String txId) throws IOException {
         Path filePath = transactionManager.getTransaction(txId).getFilePath();
 
-        // Vorher Hash speichern
         transactionManager.beforeFileEdit(txId, filePath);
 
-        // Datei löschen
         Files.deleteIfExists(filePath);
 
-        // Nachher Hash als leer setzen, da Datei nicht mehr existiert
         transactionManager.afterFileEdit(txId, filePath);
 
-        // Transaktion beenden
         transactionManager.commitTransaction(txId);
 
     }

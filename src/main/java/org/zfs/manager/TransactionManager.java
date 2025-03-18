@@ -34,9 +34,6 @@ public class TransactionManager {
         }
 
         activeTransactions.put(txId, new Transaction(txId, snapshot, filePath, initialHash, beforeEditHash, currentHash));
-        System.out.println("Transaktionen");
-        System.out.println(activeTransactions.get(txId));
-        System.out.println("\n\n");
 
         return txId;
     }

@@ -1,6 +1,8 @@
 package org.zfs.manager;
 
 import org.zfs.model.Transaction;
+import org.zfs.utils.FileUtils;
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.security.MessageDigest;
@@ -11,11 +13,13 @@ public class ConflictDetector {
 
     public static boolean hasConflicts(Transaction tx) throws IOException {
         String currentFileSystemHash = ConflictDetector.computeFileHash(tx.getFilePath());
-
         return !tx.getInitialHash().equals(tx.getBeforeEditHash()) || !currentFileSystemHash.equals(tx.getCurrentHash());
     }
 
     public static String computeFileHash(Path path) throws IOException {
+        if(!FileUtils.fileExists(path)){
+            return "";
+        }
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] fileBytes = Files.readAllBytes(path);
